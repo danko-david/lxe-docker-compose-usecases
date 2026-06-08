@@ -1,0 +1,212 @@
+#!/bin/bash
+
+# helper script
+# Used to wrap custom operations inside one script
+############################# RH helper functions ##############################
+
+ROOT=$(dirname $(readlink -f $0))
+
+_rh_try_ret_help()
+{
+	if [ ! -z $RH_RUNTIME_REQUEST_HELP ]
+	then
+		echo $1
+		exit 1;
+	fi
+}
+
+entrypoint()
+{
+    _rh_try_ret_help 'Run entrypoint logic inside controller container'
+
+	# Place right at the start, in first start dns container is dying because of missing
+	# Corefile configuration, so generate as fast as possible.
+	regenerate_dns_zone_docker
+	service_docker_dns_zones &
+	
+	run_coredns &
+
+    exec /bin/tail -f /dev/null
+}
+
+run_coredns()
+{
+	/usr/bin/coredns -conf /dns/Corefile
+}
+
+regenerate_dns_zone_docker()
+{
+	# create docker dir if not exists
+	mkdir -p /dns/zones/dynamic/docker/
+
+	{
+		cat << EOF 
+\$ORIGIN ${DNS_CORE_ZONE_NAME}.
+\$TTL 3600
+@   IN  SOA ns1.${DNS_CORE_ZONE_NAME}. admin.${DNS_CORE_ZONE_NAME}. (
+        $RANDOM ; serial
+        3600       ; refresh
+        1800       ; retry
+        1209600    ; expire
+        3600 )     ; minimum
+
+EOF
+
+	DOCKER_DATA=$(docker ps -q | xargs -n 1 docker inspect --format '{{index .Config.Labels "dns_mode" }} {{ if .Config.Labels.dns_names }}{{ .Config.Labels.dns_names }}{{end}} {{range .NetworkSettings.Networks}}{{ range .DNSNames}} {{.}} {{end}}{{end}} {{range .NetworkSettings.Networks}} {{.IPAddress}}{{end}}')
+
+	while read -r -a REC
+	do
+		pn=${#REC[@]}
+		if [ $pn '>' 1 ]
+		then
+			lst=$(expr $pn - 1)
+			lstp=$(expr $pn - 2)
+			for e in ${REC[@]:1:$lstp}
+			do
+				if [ "delegated" = "${REC[0]}" ]
+				then
+					# only records witouth dot
+					if ! [[ "${e}" =~ \. ]]
+					then
+						echo ${e}.original-ip IN A ${REC[$lst]}
+					fi
+				else
+					echo $e IN A ${REC[$lst]}
+				fi
+			done
+			echo 
+		fi
+	done <<< "$DOCKER_DATA"
+
+	} > /tmp/${DNS_CORE_ZONE_NAME}
+
+	mv /tmp/${DNS_CORE_ZONE_NAME} /dns/zones/dynamic/docker/${DNS_CORE_ZONE_NAME}
+
+	{
+	while read -r -a REC
+	do
+		pn=${#REC[@]}
+		if [ $pn '>' 1 ]
+		then
+			if [ "delegated" = "${REC[0]}" ]
+			then
+				NAMES=()
+			
+				lst=$(expr $pn - 1)
+				lstp=$(expr $pn - 2)
+				for e in ${REC[@]:1:$lstp}
+				do
+					
+				# only records witouth dot and not starting with number
+				if ! [[ "${e}" =~ \. ]] && ! grep -qP '^\d' <<< "${e}"
+				then
+				ESC_RECORD=$(sed 's/\./\\./g' <<< "${e}.${DNS_CORE_ZONE_NAME}")
+cat << EOF
+${e}.${DNS_CORE_ZONE_NAME} {
+	template ANY ANY ${e}.${DNS_CORE_ZONE_NAME} {
+		match ^${ESC_RECORD}\.$
+		answer "{{ .Name }} 60 IN CNAME ${e}.original-ip.${DNS_CORE_ZONE_NAME}."
+		fallthrough
+	}
+	forward . ${REC[$lst]}
+}
+EOF
+				fi
+				done
+			fi
+		fi
+	done <<< "$DOCKER_DATA"
+
+
+cat << EOF
+. {
+    # Serve authoritative zone from a BIND file
+    auto . {
+        directory /dns/zones/ (.*) {1}
+        reload 3s 1s
+    }
+
+    # Include external forwarding rules
+    forward . /etc/resolv.conf
+
+    # Basic logging and health checks
+    #log
+    errors
+    #prometheus :9153
+    ready
+    reload 3s 1s
+}
+EOF
+	} > /tmp/Corefile
+
+	mv /tmp/Corefile /dns/Corefile
+}
+
+
+service_docker_dns_zones()
+{
+    regenerate_dns_zone_docker
+    docker events --filter 'event=start' --filter 'event=restart' --filter 'event=die' | while IFS= read -r line
+    do
+        # Start or die event
+        if grep -qP '^[^ ]+ container (start|die)' <<< $line
+        then
+            regenerate_dns_zone_docker
+        fi
+    done
+}
+
+############################ RH built-in functions #############################
+
+help()
+{
+	_rh_try_ret_help "Returns RH help with the list of all annotated functions"
+
+	echo "RH stands for 'right hand'. It is a wrapper script wherein you can collect tiny commands."
+	echo "Specify one righthand function from the followings:"
+
+	RH_RUNTIME_REQUEST_HELP=true
+
+	for f in ${RH_FUNCTIONS[@]}
+	do
+		# if the command has help
+		if type $f | grep -qzP '{\s+_rh_try_ret_help '
+		then
+			echo -e "\t$f - "$($f)
+		fi
+	done
+}
+
+
+
+############################## Application area ################################
+
+# Collection available commands
+RH_FUNCTIONS=()
+
+for func in `typeset -F | grep -Po '(?<=-f).*$' | sort`
+do
+	RH_FUNCTIONS+=($func);
+done
+
+# print help if nothing specified
+
+if [ $# '<' '1' ]
+then
+	help
+	exit 1
+fi
+
+# run command
+for f in ${RH_FUNCTIONS[@]}
+do
+	if [ "$1" "=" "$f" ]
+	then
+		$f "${@:2}"
+		exit $?
+	fi
+done
+
+echo "Righthand function $1 not found, so now printing help..."
+help
+exit 1

@@ -1,0 +1,6 @@
+
+
+LXE_INSTALL="base,docker,xrdp,xfce,terraform,ssh,python,go,ansible,flatpak,kubectl,helm,snap"
+
+LXE_INSTALL_APT="firefox-esr"
+

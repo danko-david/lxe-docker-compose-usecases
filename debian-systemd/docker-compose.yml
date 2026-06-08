@@ -1,0 +1,27 @@
+services:
+  system:
+    build:
+      context: .
+    image: lxe/debian-systemd
+    restart: unless-stopped
+    
+    cap_add:
+      - ALL
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+      - systempaths=unconfined
+    tmpfs:
+      - /tmp
+      - /run
+    volumes:
+      # Required for systemd
+      - /sys/fs/cgroup:/sys/fs/cgroup
+      # Required for docker (Overlay can't be mounted on overlay)
+      - ./data/docker:/var/lib/docker
+      - ./data/containerd:/var/lib/containerd
+      # User data
+      - ./data/data:/data
+      - ./data/home:/home
+      # execute all (*.init.sh) scripts inside this directory
+      - ./containerinit:/containerinit

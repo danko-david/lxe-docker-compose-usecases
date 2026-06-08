@@ -1,0 +1,16 @@
+[Unit]
+Description=Run container init scripts
+# Runs only if mount point exists
+RequiresMountsFor=/containerinit
+After=local-fs.target network.target
+
+[Service]
+Type=oneshot
+Type=simple
+ExecStart=/bin/bash -c 'echo "=== Start container init ==="; run-parts --verbose --regex "\.init\.sh$" /containerinit; echo "=== Container init done ==="'
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

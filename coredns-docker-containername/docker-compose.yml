@@ -1,0 +1,12 @@
+services:
+  dns:
+    build:
+      context: .
+    image: lxe/coredns-docker-containername
+    restart: unless-stopped
+    environment:
+      - DNS_CORE_ZONE_NAME=docker.intra.net
+    ports:
+      - 53:53/udp
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
