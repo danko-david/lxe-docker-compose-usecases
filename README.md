@@ -1,4 +1,4 @@
-# lxe-docker-compose-usecase
+# lxe-docker-compose-usecases
 
 A collection of Docker Compose stacks of flexible building blocks, utilities and other sandbox environments. Most stacks in this repository are built from custom utilities that you can compile, configure, and deploy locally.
 

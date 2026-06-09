@@ -32,7 +32,7 @@ fi
 if chkreq ssh sshd
 then
 	pkginst sshfs ssh
-	echo "UseDNS no\nKerberosAuthentication no\nGSSAPIAuthentication no\nPermitRootLogin yes\n" >> /etc/ssh/sshd_config
+	echo -e "UseDNS no\nKerberosAuthentication no\nGSSAPIAuthentication no\nPermitRootLogin yes\n" >> /etc/ssh/sshd_config
 	systemctl enable --now ssh
 fi
 
