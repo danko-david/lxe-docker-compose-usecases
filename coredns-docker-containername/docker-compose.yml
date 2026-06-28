@@ -5,8 +5,11 @@ services:
     image: lxe/coredns-docker-containername
     restart: unless-stopped
     environment:
-      - DNS_CORE_ZONE_NAME=docker.intra.net
+      - DNS_CORE_ZONE_NAME
+      - DNS_CORE_EXTRA_DATA
     ports:
       - 53:53/udp
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Place your static configurations here
+      # - ./data/zones:/dns/zones/dynamic/static

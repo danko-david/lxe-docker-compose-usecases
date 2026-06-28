@@ -34,6 +34,12 @@ run_coredns()
 	/usr/bin/coredns -conf /dns/Corefile
 }
 
+gen_records()
+{
+	docker ps -q | xargs -n 1 docker inspect --format '{{ if index .Config.Labels "dns_mode" }}{{ index .Config.Labels "dns_mode" }}{{ else }}static{{ end }} {{ if index .Config.Labels "dns_names" }}{{ index .Config.Labels "dns_names" }}{{ end }} {{ range .NetworkSettings.Networks }}{{ range .DNSNames }}{{ . }} {{ end }}{{ end }} {{ range .NetworkSettings.Networks }}{{ if ne .IPAddress "" }} {{ .IPAddress }}{{else}} 127.0.0.99{{ end }}{{ end }}'
+	echo "$DNS_CORE_EXTRA_DATA"
+}
+
 regenerate_dns_zone_docker()
 {
 	# create docker dir if not exists
@@ -52,8 +58,7 @@ regenerate_dns_zone_docker()
 
 EOF
 
-	DOCKER_DATA=$(docker ps -q | xargs -n 1 docker inspect --format '{{index .Config.Labels "dns_mode" }} {{ if .Config.Labels.dns_names }}{{ .Config.Labels.dns_names }}{{end}} {{range .NetworkSettings.Networks}}{{ range .DNSNames}} {{.}} {{end}}{{end}} {{range .NetworkSettings.Networks}} {{.IPAddress}}{{end}}')
-
+	DOCKER_DATA=$(gen_records)
 	while read -r -a REC
 	do
 		pn=${#REC[@]}
@@ -71,10 +76,13 @@ EOF
 						echo ${e}.original-ip IN A ${REC[$lst]}
 					fi
 				else
-					echo $e IN A ${REC[$lst]}
+					if [ ! -z ${REC[$lst]} ]
+					then
+						echo $e IN A ${REC[$lst]}
+					fi
 				fi
 			done
-			echo 
+			echo
 		fi
 	done <<< "$DOCKER_DATA"
 
@@ -91,12 +99,12 @@ EOF
 			if [ "delegated" = "${REC[0]}" ]
 			then
 				NAMES=()
-			
+
 				lst=$(expr $pn - 1)
 				lstp=$(expr $pn - 2)
 				for e in ${REC[@]:1:$lstp}
 				do
-					
+
 				# only records witouth dot and not starting with number
 				if ! [[ "${e}" =~ \. ]] && ! grep -qP '^\d' <<< "${e}"
 				then
