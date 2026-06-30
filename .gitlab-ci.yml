@@ -42,6 +42,6 @@ stages:
     fi
 
 bnp-coredns-docker-containername:
-  extend: .build-and-publish-image
+  extends: .build-and-publish-image
   variables:
     IMAGE: coredns-docker-containername
