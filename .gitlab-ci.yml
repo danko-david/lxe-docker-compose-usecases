@@ -4,7 +4,7 @@ stages:
 
 .build-and-publish-image:
   stage: build
-  environment:
+  variables:
     DOCKER_REGISTRY: lxeu
     LATEST: yes
     DIRECTORY: $IMAGE
