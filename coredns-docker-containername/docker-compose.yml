@@ -2,7 +2,7 @@ services:
   dns:
     build:
       context: .
-    image: lxe/coredns-docker-containername
+    image: lxeu/coredns-docker-containername
     restart: unless-stopped
     environment:
       - DNS_CORE_ZONE_NAME

@@ -1,0 +1,47 @@
+
+stages:
+  - build
+
+.build-and-publish-image:
+  stage: build
+  environment:
+    DOCKER_REGISTRY: lxeu
+    LATEST: yes
+    DIRECTORY: $IMAGE
+    # IMAGE
+  script: |
+    # Set up env for build
+    cd $DIRECTORY
+    TAG=$(cat version)
+
+    if [ -z $TAG ]
+    then
+      echo "Version not set."
+      exit 1
+    fi
+
+    # Check if already exists on remote
+    if docker buildx imagetools inspect ${DOCKER_REGISTRY}/${IMAGE}:${TAG}
+    then
+      echo "Image already deployed"
+      exit 0
+    fi
+
+    # build image
+    docker build -t ${DOCKER_REGISTRY}/${IMAGE}:${TAG} .
+
+    # Login to dockerhub
+    echo "$DOCKERHUB_PASSWORD" | docker login --username $DOCKERHUB_USERNAME --password-stdin
+    docker push ${DOCKER_REGISTRY}/${IMAGE}:${TAG}
+
+    # Tag and push latest version
+    if [ ! -z $LATEST ]
+    then
+      docker image tag ${DOCKER_REGISTRY}/${IMAGE}:${TAG} ${DOCKER_REGISTRY}/${IMAGE}:latest
+      docker push ${DOCKER_REGISTRY}/${IMAGE}:latest
+    fi
+
+bnp-coredns-docker-containername:
+  extend: .build-and-publish-image
+  variables:
+    IMAGE: coredns-docker-containername
