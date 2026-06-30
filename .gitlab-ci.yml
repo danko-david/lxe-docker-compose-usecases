@@ -4,6 +4,7 @@ stages:
 
 .build-and-publish-image:
   stage: build
+  image: lxeu/devops-build-image
   variables:
     DOCKER_REGISTRY: lxeu
     LATEST: yes
@@ -19,6 +20,20 @@ stages:
       echo "Version not set."
       exit 1
     fi
+
+    set -x
+    wait_docker_ready()
+    {
+      rem=30
+      while ! service docker start && ! docker ps && [ $rem '>' 0 ]
+      do
+        rem=$(expr $rem - 1)
+        sleep 1
+        echo "Waiting secounds remaining: "$rem
+      done
+      docker ps
+    }
+    wait_docker_ready
 
     # Check if already exists on remote
     if docker buildx imagetools inspect ${DOCKER_REGISTRY}/${IMAGE}:${TAG}
