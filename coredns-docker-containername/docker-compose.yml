@@ -2,14 +2,18 @@ services:
   dns:
     build:
       context: .
-    image: lxeu/coredns-docker-containername
     restart: unless-stopped
     environment:
+      # If you leave empty, cotnainer will serve
+      # only zone files form the mountpoint
       - DNS_CORE_ZONE_NAME
+      # You can add extra entries
       - DNS_CORE_EXTRA_DATA
     ports:
       - 53:53/udp
     volumes:
+      # If you not mount docker, it will run with static configuration,
+      # so it will serve only records specified in $DNS_CORE_EXTRA_DATA
       - /var/run/docker.sock:/var/run/docker.sock
       # Place your static configurations here
-      # - ./data/zones:/dns/zones/dynamic/static
+      - ./data/zones:/dns/zones/dynamic/static

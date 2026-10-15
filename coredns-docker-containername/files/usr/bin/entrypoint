@@ -19,10 +19,21 @@ entrypoint()
 {
     _rh_try_ret_help 'Run entrypoint logic inside controller container'
 
+	if [ -z $DNS_CORE_ZONE_NAME ]
+	then
+		echo "WARNING: DNS_CORE_ZONE_NAME is empty. Serving only zones files."
+	fi
+
 	# Place right at the start, in first start dns container is dying because of missing
 	# Corefile configuration, so generate as fast as possible.
 	regenerate_dns_zone_docker
-	service_docker_dns_zones &
+
+	if [ ! -e /var/run/docker.sock ]
+	then
+		echo "WARNING: Docker socket is not mounted. Running only with static configuration."
+	else
+		service_docker_dns_zones &
+	fi
 	
 	run_coredns &
 
@@ -36,7 +47,10 @@ run_coredns()
 
 gen_records()
 {
-	docker ps -q | xargs -n 1 docker inspect --format '{{ if index .Config.Labels "dns_mode" }}{{ index .Config.Labels "dns_mode" }}{{ else }}static{{ end }} {{ if index .Config.Labels "dns_names" }}{{ index .Config.Labels "dns_names" }}{{ end }} {{ range .NetworkSettings.Networks }}{{ range .DNSNames }}{{ . }} {{ end }}{{ end }} {{ range .NetworkSettings.Networks }}{{ if ne .IPAddress "" }} {{ .IPAddress }}{{else}} 127.0.0.99{{ end }}{{ end }}'
+	if [ -e /var/run/docker.sock ]
+	then
+		docker ps -q | xargs -n 1 docker inspect --format '{{ if index .Config.Labels "dns_mode" }}{{ index .Config.Labels "dns_mode" }}{{ else }}static{{ end }} {{ if index .Config.Labels "dns_names" }}{{ index .Config.Labels "dns_names" }}{{ end }} {{ range .NetworkSettings.Networks }}{{ range .DNSNames }}{{ . }} {{ end }}{{ end }} {{ range .NetworkSettings.Networks }}{{ if ne .IPAddress "" }} {{ .IPAddress }}{{else}} 127.0.0.99{{ end }}{{ end }}'
+	fi
 	echo "$DNS_CORE_EXTRA_DATA"
 }
 
@@ -45,86 +59,92 @@ regenerate_dns_zone_docker()
 	# create docker dir if not exists
 	mkdir -p /dns/zones/dynamic/docker/
 
-	{
-		cat << EOF 
-\$ORIGIN ${DNS_CORE_ZONE_NAME}.
-\$TTL 3600
-@   IN  SOA ns1.${DNS_CORE_ZONE_NAME}. admin.${DNS_CORE_ZONE_NAME}. (
-        $RANDOM ; serial
-        3600       ; refresh
-        1800       ; retry
-        1209600    ; expire
-        3600 )     ; minimum
+	if [ ! -z $DNS_CORE_ZONE_NAME ]
+	then
+
+		{
+			cat << EOF 
+	\$ORIGIN ${DNS_CORE_ZONE_NAME}.
+	\$TTL 3600
+	@   IN  SOA ns1.${DNS_CORE_ZONE_NAME}. admin.${DNS_CORE_ZONE_NAME}. (
+			$RANDOM ; serial
+			3600       ; refresh
+			1800       ; retry
+			1209600    ; expire
+			3600 )     ; minimum
 
 EOF
 
-	DOCKER_DATA=$(gen_records)
-	while read -r -a REC
-	do
-		pn=${#REC[@]}
-		if [ $pn '>' 1 ]
-		then
-			lst=$(expr $pn - 1)
-			lstp=$(expr $pn - 2)
-			for e in ${REC[@]:1:$lstp}
-			do
-				if [ "delegated" = "${REC[0]}" ]
-				then
-					# only records witouth dot
-					if ! [[ "${e}" =~ \. ]]
-					then
-						echo ${e}.original-ip IN A ${REC[$lst]}
-					fi
-				else
-					if [ ! -z ${REC[$lst]} ]
-					then
-						echo $e IN A ${REC[$lst]}
-					fi
-				fi
-			done
-			echo
-		fi
-	done <<< "$DOCKER_DATA"
-
-	} > /tmp/${DNS_CORE_ZONE_NAME}
-
-	mv /tmp/${DNS_CORE_ZONE_NAME} /dns/zones/dynamic/docker/${DNS_CORE_ZONE_NAME}
-
-	{
-	while read -r -a REC
-	do
-		pn=${#REC[@]}
-		if [ $pn '>' 1 ]
-		then
-			if [ "delegated" = "${REC[0]}" ]
+		DOCKER_DATA=$(gen_records)
+		while read -r -a REC
+		do
+			pn=${#REC[@]}
+			if [ $pn '>' 1 ]
 			then
-				NAMES=()
-
 				lst=$(expr $pn - 1)
 				lstp=$(expr $pn - 2)
 				for e in ${REC[@]:1:$lstp}
 				do
-
-				# only records witouth dot and not starting with number
-				if ! [[ "${e}" =~ \. ]] && ! grep -qP '^\d' <<< "${e}"
-				then
-				ESC_RECORD=$(sed 's/\./\\./g' <<< "${e}.${DNS_CORE_ZONE_NAME}")
-cat << EOF
-${e}.${DNS_CORE_ZONE_NAME} {
-	template ANY ANY ${e}.${DNS_CORE_ZONE_NAME} {
-		match ^${ESC_RECORD}\.$
-		answer "{{ .Name }} 60 IN CNAME ${e}.original-ip.${DNS_CORE_ZONE_NAME}."
-		fallthrough
-	}
-	forward . ${REC[$lst]}
-}
-EOF
-				fi
+					if [ "forwarded" = "${REC[0]}" ]
+					then
+						# only records witouth dot
+						if ! [[ "${e}" =~ \. ]]
+						then
+							echo ${e}.original-ip IN A ${REC[$lst]}
+						fi
+					else
+						if [ ! -z ${REC[$lst]} ]
+						then
+							echo $e IN A ${REC[$lst]}
+						fi
+					fi
 				done
+				echo
 			fi
-		fi
-	done <<< "$DOCKER_DATA"
+		done <<< "$DOCKER_DATA"
 
+		} > /tmp/${DNS_CORE_ZONE_NAME}
+
+		mv /tmp/${DNS_CORE_ZONE_NAME} /dns/zones/dynamic/docker/${DNS_CORE_ZONE_NAME}
+	fi
+
+	{
+	if [ ! -z $DNS_CORE_ZONE_NAME ]
+	then
+		while read -r -a REC
+		do
+			pn=${#REC[@]}
+			if [ $pn '>' 1 ]
+			then
+				if [ "forwarded" = "${REC[0]}" ]
+				then
+					NAMES=()
+
+					lst=$(expr $pn - 1)
+					lstp=$(expr $pn - 2)
+					for e in ${REC[@]:1:$lstp}
+					do
+
+					# only records witouth dot and not starting with number
+					if ! [[ "${e}" =~ \. ]] && ! grep -qP '^\d' <<< "${e}"
+					then
+					ESC_RECORD=$(sed 's/\./\\./g' <<< "${e}.${DNS_CORE_ZONE_NAME}")
+	cat << EOF
+	${e}.${DNS_CORE_ZONE_NAME} {
+		template ANY ANY ${e}.${DNS_CORE_ZONE_NAME} {
+			match ^${ESC_RECORD}\.$
+			answer "{{ .Name }} 60 IN CNAME ${e}.original-ip.${DNS_CORE_ZONE_NAME}."
+			fallthrough
+		}
+		forward . ${REC[$lst]}
+	}
+EOF
+					fi
+					done
+				fi
+			fi
+		done <<< "$DOCKER_DATA"
+	fi
 
 cat << EOF
 . {
